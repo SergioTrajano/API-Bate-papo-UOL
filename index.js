@@ -38,7 +38,7 @@ server.get('/participants', async (req, res) => {
         res.send(participantsList);
         mongoClient.close();
     } catch (error) {
-        res.sendStatus(500);
+        res.status(500).send(error);
         mongoClient.close();
     }
 });
@@ -67,7 +67,7 @@ server.post('/participants', async (req, res) => {
         }
         
         await participants.insertOne({
-            name: user.name,
+            name: user.name.trim(),
             lastStatus: Date.now(),
         });
         await messages.insertOne({
@@ -81,7 +81,7 @@ server.post('/participants', async (req, res) => {
         res.sendStatus(201);
         mongoClient.close();
     } catch (error) {
-        res.sendStatus(500);
+        res.status(500).send(error);
         mongoClient.close();
     }
 });
@@ -103,11 +103,11 @@ server.get('/messages', async (req, res) => {
             return;
         }
 
-        res.send(messagesToSend);
+        res.status(200).send(messagesToSend);
         mongoClient.close();
 
     } catch (error) {
-        res.sendStatus(500);
+        res.status(500).send(error);
         mongoClient.close();
     }
 
@@ -120,17 +120,12 @@ server.post('/messages', async (req, res) => {
     try {
         await mongoClient.connect();
         const dbUOL = mongoClient.db('UOL');
-        const messages = dbUOL.collection('messages');
         const participants = dbUOL.collection('participants');
-        const participantsList = await participants.find().toArray();
-
-        
+        const messages = dbUOL.collection('messages');
+        const participantsList = await participants.find().toArray();       
         const bodyValidation = messageSchema.validate(message);
-        const headersValidation = headersSchema.validate(sender);
-
 
         if (bodyValidation.error || !sender.user ||!participantsList.some(participant => participant.name === sender.user)) {
-            console.log(headersValidation.error.details);
             res.sendStatus(422);
             mongoClient.close();
             return;
@@ -146,29 +141,61 @@ server.post('/messages', async (req, res) => {
         res.sendStatus(201);
         mongoClient.close();
 
-    } catch (erro) {
-        res.status(500);
+    } catch (error) {
+        res.status(500).send(error);
         mongoClient.close();
     }
 });
 
+server.delete('/messages/:idMessage', async (req, res) => {
+    const { idMessage } = req.params;
+    const user = req.headers.user;
+
+    try {
+        await mongoClient.connect();
+        const dbUOL = mongoClient.db('UOL');
+        const messages = dbUOL.collection('messages');
+        const messagesList = await messages.findOne({ _id: new ObjectId(idMessage)});
+
+        if (!messagesList) {
+            res.sendStatus(404);
+            mongoClient.close();
+            return;
+        }
+        if (messagesList.from !== user) {
+            res.sendStatus(401);
+            mongoClient.close();
+            return;
+        }
+
+        await messages.deleteOne({_id: new ObjectId(idMessage)});
+
+        res.sendStatus(200);
+        mongoClient.close();
+    } catch (error) {
+        console.log(error);
+        res.status(500).send(error);
+        mongoClient.close();
+    }
+})
+
 server.post('/status', async (req, res) => {
-    const participant = req.headers.user;
+    const user = req.headers.user;
 
     try {
         await mongoClient.connect();
         const dbUOL = mongoClient.db('UOL');
         const participants = dbUOL.collection('participants');
-        const participantsList = await participants.find().toArray();
+        const participantsList = await participants.find({name: user}).toArray();
 
-        if (!participantsList.some(person => person.name === participant)) {
+        if (!participantsList) {
             res.sendStatus(404);
             mongoClient.close();
             return;
         }
 
         await participants.updateOne({
-            name: participant
+            name: user
         }, { $set: 
             { 
                 lastStatus: Date.now(),
@@ -178,7 +205,7 @@ server.post('/status', async (req, res) => {
         res.sendStatus(200);
         mongoClient.close();
     } catch (error) {
-        res.sendStatus(500);
+        res.status(500).send(error);
         mongoClient.close();
     }
 });
@@ -205,7 +232,7 @@ setInterval(async () => {
     }
 
     mongoClient.close();
-}, 10000);
+}, 15000);
 
 server.listen(5000, () => {
     console.log('Servidor rodando!');
